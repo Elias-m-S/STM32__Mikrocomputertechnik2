@@ -1,0 +1,8 @@
+# Ignore Files with Suffix
+
+# Ignore Folders
+/eclipse/.metadata/
+/eclipse/*/target/
+
+/CubeMx/.mxproject
+/documentation/
