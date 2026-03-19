@@ -1,6 +1,6 @@
 /**
  * @file      storage.c
- * @brief     Persistent storage handling using STM EEPROM emulation.
+ * @brief     Non-volatile data persistence using STM EEPROM emulation layer.
  */
 
 /*******************************************************************************
@@ -19,61 +19,61 @@
 * Defines
 *******************************************************************************/
 
-/** @brief EEPROM identifier for the startup counter. */
-#define STORAGE_ID_STARTUP_COUNTER        1U
+/** @brief Virtual EEPROM key for boot sequence counter. */
+#define NVRAM_KEY_BOOT_COUNT              1U
 
-/** @brief EEPROM identifier for the accumulated runtime in milliseconds. */
-#define STORAGE_ID_RUNTIME_MS             2U
+/** @brief Virtual EEPROM key for cumulative execution time. */
+#define NVRAM_KEY_EXEC_TIME_MILLIS        2U
 
-/** @brief Period in milliseconds for persisting runtime to non-volatile memory. */
-#define STORAGE_PERSIST_PERIOD_MS         5000UL
+/** @brief Flush interval for runtime metrics to non-volatile storage. */
+#define NVRAM_FLUSH_INTERVAL_MS           5000UL
 
 /*******************************************************************************
 * Local Types and Typedefs
 *******************************************************************************/
 
-/** @brief Internal runtime context of the storage module. */
+/** @brief Persistent data manager context. */
 typedef struct
 {
-    /** Indicates whether the module was initialized. */
-    bool initialized;
-    /** Indicates whether the EEPROM emulation is ready. */
-    bool nvmReady;
+    /** Module initialization status flag. */
+    bool isReady;
+    /** Non-volatile memory interface availability. */
+    bool memoryAvailable;
 
-    /** Persisted startup counter value. */
-    uint32_t startupCounter;
-    /** Accumulated runtime in milliseconds. */
-    uint32_t accumulatedRuntimeMs;
+    /** Current boot counter value. */
+    uint32_t bootCount;
+    /** Current execution time accumulator. */
+    uint32_t execTimeMs;
 
-    /** Tick of the last runtime update. */
-    uint32_t lastTick;
-    /** Tick of the last persist operation. */
-    uint32_t lastPersistTick;
-} Storage_Context;
+    /** Previous HAL_GetTick() snapshot. */
+    uint32_t prevSystemTick;
+    /** Last time metrics were flushed to NVM. */
+    uint32_t prevFlushTick;
+} PersistentData_Manager;
 
 /*******************************************************************************
 * Static Function Prototypes
 *******************************************************************************/
 
-static void Storage_InitPartitionIfRequired(void);
-static uint32_t Storage_ReadVariable32(uint16_t identifier);
-static void Storage_WriteVariable32(uint16_t identifier, uint32_t value);
+static void PersistentData_InitializePartition(void);
+static uint32_t PersistentData_FetchValue(uint16_t key);
+static void PersistentData_StoreValue(uint16_t key, uint32_t val);
 
 /*******************************************************************************
 * Static Variables
 *******************************************************************************/
 
-/** @brief Global context of the storage module. */
-static Storage_Context s_storage;
+/** @brief Global persistent data manager instance. */
+static PersistentData_Manager g_persistMgr;
 
 /*******************************************************************************
 * Functions
 *******************************************************************************/
 
-/** @brief Initializes and repairs the EEPROM emulation partition if required. */
-static void Storage_InitPartitionIfRequired(void)
+/** @brief Initializes the EEPROM partition if needed or repairs corruption. */
+static void PersistentData_InitializePartition(void)
 {
-    EE_Status status;
+    EE_Status initStatus;
 
     __HAL_RCC_CRC_CLK_ENABLE();
     HAL_CRC_DeInit(&hcrc);
@@ -84,46 +84,41 @@ static void Storage_InitPartitionIfRequired(void)
         Error_Handler();
     }
 
-    status = EE_Init(EE_CONDITIONAL_ERASE);
+    initStatus = EE_Init(EE_CONDITIONAL_ERASE);
 
-    if (status == EE_CLEANUP_REQUIRED)
+    if (initStatus == EE_CLEANUP_REQUIRED)
     {
-        status = EE_CleanUp();
+        initStatus = EE_CleanUp();
 
-        if (status != EE_OK)
+        if (initStatus != EE_OK)
         {
             (void)HAL_FLASH_Lock();
             Error_Handler();
         }
     }
 
-    else if (status != EE_OK)
+    else if (initStatus != EE_OK)
     {
-        status = EE_Format(EE_FORCED_ERASE);
+        initStatus = EE_Format(EE_FORCED_ERASE);
 
-        if (status != EE_OK)
+        if (initStatus != EE_OK)
         {
             (void)HAL_FLASH_Lock();
             Error_Handler();
         }
 
-        status = EE_Init(EE_CONDITIONAL_ERASE);
+        initStatus = EE_Init(EE_CONDITIONAL_ERASE);
 
-        if (status == EE_CLEANUP_REQUIRED)
+        if (initStatus == EE_CLEANUP_REQUIRED)
         {
-            status = EE_CleanUp();
+            initStatus = EE_CleanUp();
         }
 
-        if (status != EE_OK)
+        if (initStatus != EE_OK)
         {
             (void)HAL_FLASH_Lock();
             Error_Handler();
         }
-    }
-
-    else
-    {
-        /* Partition already valid */
     }
 
     HAL_CRC_DeInit(&hcrc);
@@ -136,25 +131,25 @@ static void Storage_InitPartitionIfRequired(void)
 }
 
 /**
- * @brief Reads a 32-bit value from EEPROM emulation.
+ * @brief Retrieves a 32-bit value from virtual EEPROM.
  *
- * @param identifier Virtual EEPROM variable identifier.
+ * @param key Virtual EEPROM variable identifier.
  *
- * @return Stored value, or 0 if no value exists.
+ * @return Retrieved value, 0 if key does not exist.
  */
-static uint32_t Storage_ReadVariable32(uint16_t identifier)
+static uint32_t PersistentData_FetchValue(uint16_t key)
 {
-    EE_Status status;
-    uint32_t value = 0UL;
+    EE_Status fetchStatus;
+    uint32_t fetchedVal = 0UL;
 
-    status = EE_ReadVariable32bits(identifier, &value);
+    fetchStatus = EE_ReadVariable32bits(key, &fetchedVal);
 
-    if (status == EE_OK)
+    if (fetchStatus == EE_OK)
     {
-        return value;
+        return fetchedVal;
     }
 
-    if (status == EE_NO_DATA)
+    if (fetchStatus == EE_NO_DATA)
     {
         return 0UL;
     }
@@ -164,33 +159,33 @@ static uint32_t Storage_ReadVariable32(uint16_t identifier)
 }
 
 /**
- * @brief Writes a 32-bit value to EEPROM emulation.
+ * @brief Persists a 32-bit value to virtual EEPROM.
  *
- * @param identifier Virtual EEPROM variable identifier.
- * @param value Value to write.
+ * @param key Virtual EEPROM variable identifier.
+ * @param val Value to persist.
  */
-static void Storage_WriteVariable32(uint16_t identifier, uint32_t value)
+static void PersistentData_StoreValue(uint16_t key, uint32_t val)
 {
-    EE_Status status;
+    EE_Status storeStatus;
 
     if (HAL_FLASH_Unlock() != HAL_OK)
     {
         Error_Handler();
     }
 
-    status = EE_WriteVariable32bits(identifier, value);
+    storeStatus = EE_WriteVariable32bits(key, val);
 
-    if (status == EE_CLEANUP_REQUIRED)
+    if (storeStatus == EE_CLEANUP_REQUIRED)
     {
-        status = EE_CleanUp();
+        storeStatus = EE_CleanUp();
 
-        if (status != EE_OK)
+        if (storeStatus != EE_OK)
         {
             (void)HAL_FLASH_Lock();
             Error_Handler();
         }
 
-        status = EE_WriteVariable32bits(identifier, value);
+        storeStatus = EE_WriteVariable32bits(key, val);
     }
 
     if (HAL_FLASH_Lock() != HAL_OK)
@@ -198,95 +193,95 @@ static void Storage_WriteVariable32(uint16_t identifier, uint32_t value)
         Error_Handler();
     }
 
-    if (status != EE_OK)
+    if (storeStatus != EE_OK)
     {
         Error_Handler();
     }
 }
 
-/** @brief Initializes the storage module context. */
+/** @brief Prepares persistent data manager for operation. */
 void Storage_Init(void)
 {
-    (void)memset(&s_storage, 0, sizeof(s_storage));
-    s_storage.initialized = true;
+    (void)memset(&g_persistMgr, 0, sizeof(g_persistMgr));
+    g_persistMgr.isReady = true;
 }
 
-/** @brief Initializes persistent storage for the active main state. */
+/** @brief Loads metrics from NVM and initializes runtime tracking. */
 void Storage_MainStateInit(void)
 {
-    uint32_t currentTick;
+    uint32_t nowTick;
 
-    if (s_storage.initialized == false)
+    if (g_persistMgr.isReady == false)
     {
         Error_Handler();
     }
 
-    Storage_InitPartitionIfRequired();
+    PersistentData_InitializePartition();
 
-    s_storage.startupCounter = Storage_ReadVariable32(STORAGE_ID_STARTUP_COUNTER);
-    s_storage.accumulatedRuntimeMs = Storage_ReadVariable32(STORAGE_ID_RUNTIME_MS);
+    g_persistMgr.bootCount = PersistentData_FetchValue(NVRAM_KEY_BOOT_COUNT);
+    g_persistMgr.execTimeMs = PersistentData_FetchValue(NVRAM_KEY_EXEC_TIME_MILLIS);
 
-    s_storage.startupCounter++;
-    Storage_WriteVariable32(STORAGE_ID_STARTUP_COUNTER, s_storage.startupCounter);
+    g_persistMgr.bootCount++;
+    PersistentData_StoreValue(NVRAM_KEY_BOOT_COUNT, g_persistMgr.bootCount);
 
-    currentTick = HAL_GetTick();
-    s_storage.lastTick = currentTick;
-    s_storage.lastPersistTick = currentTick;
-    s_storage.nvmReady = true;
+    nowTick = HAL_GetTick();
+    g_persistMgr.prevSystemTick = nowTick;
+    g_persistMgr.prevFlushTick = nowTick;
+    g_persistMgr.memoryAvailable = true;
 }
 
-/** @brief Cyclic runtime accumulation and periodic persistence. */
+/** @brief Accumulates runtime and flushes to NVM at periodic intervals. */
 void Storage_Cyclic(void)
 {
-    uint32_t currentTick;
-    uint32_t deltaTick;
+    uint32_t nowTick;
+    uint32_t elapsedMs;
 
-    if ((s_storage.initialized == false) || (s_storage.nvmReady == false))
+    if ((g_persistMgr.isReady == false) || (g_persistMgr.memoryAvailable == false))
     {
         return;
     }
 
-    currentTick = HAL_GetTick();
-    deltaTick = currentTick - s_storage.lastTick;
-    s_storage.lastTick = currentTick;
+    nowTick = HAL_GetTick();
+    elapsedMs = nowTick - g_persistMgr.prevSystemTick;
+    g_persistMgr.prevSystemTick = nowTick;
 
-    s_storage.accumulatedRuntimeMs += deltaTick;
+    g_persistMgr.execTimeMs += elapsedMs;
 
-    if ((currentTick - s_storage.lastPersistTick) >= STORAGE_PERSIST_PERIOD_MS)
+    if ((nowTick - g_persistMgr.prevFlushTick) >= NVRAM_FLUSH_INTERVAL_MS)
     {
-        Storage_WriteVariable32(STORAGE_ID_RUNTIME_MS, s_storage.accumulatedRuntimeMs);
-        s_storage.lastPersistTick = currentTick;
+        PersistentData_StoreValue(NVRAM_KEY_EXEC_TIME_MILLIS, g_persistMgr.execTimeMs);
+        g_persistMgr.prevFlushTick = nowTick;
     }
 }
 
-/** @brief Writes the current runtime value before shutdown. */
+/** @brief Flushes accumulated runtime to NVM before system shutdown. */
 void Storage_PrepareShutdown(void)
 {
-    if ((s_storage.initialized == false) || (s_storage.nvmReady == false))
+    if ((g_persistMgr.isReady == false) || (g_persistMgr.memoryAvailable == false))
     {
         return;
     }
 
-    Storage_WriteVariable32(STORAGE_ID_RUNTIME_MS, s_storage.accumulatedRuntimeMs);
-    s_storage.lastPersistTick = HAL_GetTick();
+    PersistentData_StoreValue(NVRAM_KEY_EXEC_TIME_MILLIS, g_persistMgr.execTimeMs);
+    g_persistMgr.prevFlushTick = HAL_GetTick();
 }
 
 /**
- * @brief Returns the persisted startup counter.
+ * @brief Retrieves the boot sequence counter.
  *
- * @return Startup counter value.
+ * @return Current boot count.
  */
 uint32_t Storage_GetStartupCounter(void)
 {
-    return s_storage.startupCounter;
+    return g_persistMgr.bootCount;
 }
 
 /**
- * @brief Returns the accumulated runtime in milliseconds.
+ * @brief Retrieves the accumulated runtime counter.
  *
- * @return Accumulated runtime value.
+ * @return Cumulative execution time in milliseconds.
  */
 uint32_t Storage_GetAccumulatedRuntimeMs(void)
 {
-    return s_storage.accumulatedRuntimeMs;
+    return g_persistMgr.execTimeMs;
 }

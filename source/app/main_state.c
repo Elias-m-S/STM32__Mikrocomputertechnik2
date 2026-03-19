@@ -65,10 +65,7 @@ void MainState_Init(MainState* const pThis)
     /* Construct all modules */
     CtorAll_Construct(pThis);
 
-    /* Initialize logical sensor state before enabling supply */
-    Acceleration_Init();
-
-    /* Enable GY-521 supply from MainState_Init context */
+    /* Enable VCC for Accelerometer */
     Acceleration_MainStateInit();
 
     RunState_Init(pThis->pCfg->pRunState);

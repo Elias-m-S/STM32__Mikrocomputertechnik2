@@ -1,6 +1,6 @@
 /**
  * @file      acceleration.c
- * @brief     Acceleration sensor handling for GY-521.
+ * @brief     Inertial measurement unit sensor handling for GY-521.
  */
 
 /*******************************************************************************
@@ -19,179 +19,179 @@
 * Defines
 *******************************************************************************/
 
-/** @brief I2C address of the MPU-6050 sensor in HAL format. */
-#define ACC_I2C_ADDRESS                  (0x68U << 1U)
+/** @brief I2C slave address of the MPU-6050 sensor. */
+#define IMU_I2C_ADDR                     (0x68U << 1U)
 
-/** @brief Start register for accelerometer raw data. */
-#define ACC_REG_ACCEL_XOUT_H             0x3BU
+/** @brief First register address for accelerometer measurements. */
+#define IMU_REG_ACCEL_DATA_START         0x3BU
 
-/** @brief Start register for gyroscope raw data. */
-#define ACC_REG_GYRO_XOUT_H              0x43U
+/** @brief First register address for gyroscope measurements. */
+#define IMU_REG_GYRO_DATA_START          0x43U
 
-/** @brief Configuration register address. */
-#define ACC_REG_CONFIG                   0x1AU
+/** @brief Digital low-pass filter configuration register. */
+#define IMU_REG_DLPF_CONFIG              0x1AU
 
-/** @brief Gyroscope configuration register address. */
-#define ACC_REG_GYRO_CONFIG              0x1BU
+/** @brief Rotational rate full-scale configuration register. */
+#define IMU_REG_GYRO_RANGE_CONFIG        0x1BU
 
-/** @brief Accelerometer configuration register address. */
-#define ACC_REG_ACCEL_CONFIG             0x1CU
+/** @brief Linear acceleration full-scale configuration register. */
+#define IMU_REG_ACCEL_RANGE_CONFIG       0x1CU
 
-/** @brief Power management register address. */
-#define ACC_REG_PWR_MGMT_1               0x6BU
+/** @brief Power control and clock selection register. */
+#define IMU_REG_PWR_CONTROL              0x6BU
 
-/** @brief GPIO port used to power the sensor. */
-#define ACC_PWR_GPIO_Port                GPIOC
+/** @brief Port for power supply control. */
+#define IMU_SUPPLY_PORT                  GPIOC
 
-/** @brief GPIO pin used to power the sensor. */
-#define ACC_PWR_Pin                      GPIO_PIN_5
+/** @brief Pin for power supply control. */
+#define IMU_SUPPLY_PIN                   GPIO_PIN_5
 
-/** @brief Sensor read interval in milliseconds. */
-#define ACC_READ_PERIOD_MS               1000U
+/** @brief Sampling interval in milliseconds. */
+#define IMU_SAMPLE_INTERVAL_MS           1000U
 
-/** @brief Number of configuration steps. */
-#define ACC_CONFIG_STEP_COUNT            4U
+/** @brief Number of configuration register writes. */
+#define IMU_CONFIG_REGISTER_COUNT        4U
 
 /*******************************************************************************
 * Local Types and Typedefs
 *******************************************************************************/
 
-/** @brief Internal state of the acceleration module. */
+/** @brief State machine states for sensor operation. */
 typedef enum
 {
-    /** Sensor is powered off. */
-    AccelerationState_Off = 0,
-    /** Sensor is idle and ready. */
-    AccelerationState_Idle,
-    /** Configuration transfer is active. */
-    AccelerationState_ConfigBusy,
-    /** Accelerometer read transfer is active. */
-    AccelerationState_ReadAccelBusy,
-    /** Gyroscope read transfer is active. */
-    AccelerationState_ReadGyroBusy
-} AccelerationState_t;
+    /** Sensor powered off. */
+    ImuState_Powered_Off = 0,
+    /** Sensor ready and idle. */
+    ImuState_Ready,
+    /** Configuration sequence in progress. */
+    ImuState_Configuring,
+    /** Accelerometer data retrieval in progress. */
+    ImuState_Fetching_Accel,
+    /** Gyroscope data retrieval in progress. */
+    ImuState_Fetching_Gyro
+} ImuState_t;
 
-/** @brief Internal runtime context of the acceleration module. */
+/** @brief Module operational context and state variables. */
 typedef struct
 {
-    /** Current module state. */
-    AccelerationState_t state;
+    /** Current operational state. */
+    ImuState_t state;
 
-    /** Indicates whether sensor power is enabled. */
-    bool powerEnabled;
-    /** Indicates that configuration was requested. */
-    bool configureRequested;
-    /** Indicates that configuration is complete. */
-    bool configured;
+    /** Power supply status flag. */
+    bool power_active;
+    /** Pending configuration request flag. */
+    bool config_pending;
+    /** Configuration completion status flag. */
+    bool config_done;
 
-    /** Set when DMA transmit finished. */
-    volatile bool txDone;
-    /** Set when DMA receive finished. */
-    volatile bool rxDone;
+    /** DMA write transfer completion flag. */
+    volatile bool write_finished;
+    /** DMA read transfer completion flag. */
+    volatile bool read_finished;
 
-    /** Current configuration step. */
-    uint8_t configStep;
-    /** Temporary transmit byte for register writes. */
-    uint8_t txValue;
+    /** Current configuration register index. */
+    uint8_t register_index;
+    /** Temporary storage for register write value. */
+    uint8_t register_value;
 
-    /** Raw accelerometer receive buffer. */
-    uint8_t accelBuffer[6];
-    /** Raw gyroscope receive buffer. */
-    uint8_t gyroBuffer[6];
+    /** Buffer for accelerometer raw byte data. */
+    uint8_t accel_raw_bytes[6];
+    /** Buffer for gyroscope raw byte data. */
+    uint8_t gyro_raw_bytes[6];
 
-    /** Tick of the last sensor read. */
-    uint32_t lastReadTick;
+    /** Timestamp of most recent measurement. */
+    uint32_t measurement_timestamp;
 
-    /** Latest sensor data. */
-    Acceleration_Data data;
+    /** Latest measurement data. */
+    Acceleration_Data measurement;
 
-} Acceleration_Context_t;
+} ImuContext_t;
 
 /*******************************************************************************
 * Static Function Prototypes
 *******************************************************************************/
 
-static bool Acceleration_StartConfigStep(uint8_t step);
-static bool Acceleration_StartAccelRead(void);
-static bool Acceleration_StartGyroRead(void);
-static void Acceleration_ParseAccel(void);
-static void Acceleration_ParseGyro(void);
+static bool Imu_InitiateRegisterWrite(uint8_t reg_index);
+static bool Imu_InitiateAccelRetrieval(void);
+static bool Imu_InitiateGyroRetrieval(void);
+static void Imu_TransformAccelBytes(void);
+static void Imu_TransformGyroBytes(void);
 
 /*******************************************************************************
 * Static Variables
 *******************************************************************************/
 
-/** @brief Global context of the acceleration module. */
-static Acceleration_Context_t s_acceleration;
+/** @brief Module runtime context. */
+static ImuContext_t s_imu_context;
 
 /*******************************************************************************
 * Functions
 *******************************************************************************/
 
 /**
- * @brief Starts one configuration step of the sensor.
+ * @brief Initiates a DMA-based register write operation.
  *
- * @param step Configuration step index.
+ * @param reg_index Index of configuration step.
  *
- * @return true if the transfer was started successfully, otherwise false.
+ * @return true on successful transfer initiation, false otherwise.
  */
-static bool Acceleration_StartConfigStep(uint8_t step)
+static bool Imu_InitiateRegisterWrite(uint8_t reg_index)
 {
-    HAL_StatusTypeDef status = HAL_ERROR;
+    HAL_StatusTypeDef transfer_status = HAL_ERROR;
 
-    if (step == 0U)
+    if (reg_index == 0U)
     {
-        s_acceleration.txValue = 0x01U;
-        status = HAL_I2C_Mem_Write_DMA(&hi2c3,
-                                       ACC_I2C_ADDRESS,
-                                       ACC_REG_PWR_MGMT_1,
-                                       I2C_MEMADD_SIZE_8BIT,
-                                       &s_acceleration.txValue,
-                                       1U);
+        s_imu_context.register_value = 0x01U;
+        transfer_status = HAL_I2C_Mem_Write_DMA(&hi2c3,
+                                                IMU_I2C_ADDR,
+                                                IMU_REG_PWR_CONTROL,
+                                                I2C_MEMADD_SIZE_8BIT,
+                                                &s_imu_context.register_value,
+                                                1U);
     }
 
-    else if (step == 1U)
+    else if (reg_index == 1U)
     {
-        s_acceleration.txValue = 0x05U;
-        status = HAL_I2C_Mem_Write_DMA(&hi2c3,
-                                       ACC_I2C_ADDRESS,
-                                       ACC_REG_CONFIG,
-                                       I2C_MEMADD_SIZE_8BIT,
-                                       &s_acceleration.txValue,
-                                       1U);
+        s_imu_context.register_value = 0x05U;
+        transfer_status = HAL_I2C_Mem_Write_DMA(&hi2c3,
+                                                IMU_I2C_ADDR,
+                                                IMU_REG_DLPF_CONFIG,
+                                                I2C_MEMADD_SIZE_8BIT,
+                                                &s_imu_context.register_value,
+                                                1U);
     }
 
-    else if (step == 2U)
+    else if (reg_index == 2U)
     {
-        s_acceleration.txValue = 0x10U;
-        status = HAL_I2C_Mem_Write_DMA(&hi2c3,
-                                       ACC_I2C_ADDRESS,
-                                       ACC_REG_GYRO_CONFIG,
-                                       I2C_MEMADD_SIZE_8BIT,
-                                       &s_acceleration.txValue,
-                                       1U);
+        s_imu_context.register_value = 0x10U;
+        transfer_status = HAL_I2C_Mem_Write_DMA(&hi2c3,
+                                                IMU_I2C_ADDR,
+                                                IMU_REG_GYRO_RANGE_CONFIG,
+                                                I2C_MEMADD_SIZE_8BIT,
+                                                &s_imu_context.register_value,
+                                                1U);
     }
 
-    else if (step == 3U)
+    else if (reg_index == 3U)
     {
-        s_acceleration.txValue = 0x18U;
-        status = HAL_I2C_Mem_Write_DMA(&hi2c3,
-                                       ACC_I2C_ADDRESS,
-                                       ACC_REG_ACCEL_CONFIG,
-                                       I2C_MEMADD_SIZE_8BIT,
-                                       &s_acceleration.txValue,
-                                       1U);
+        s_imu_context.register_value = 0x18U;
+        transfer_status = HAL_I2C_Mem_Write_DMA(&hi2c3,
+                                                IMU_I2C_ADDR,
+                                                IMU_REG_ACCEL_RANGE_CONFIG,
+                                                I2C_MEMADD_SIZE_8BIT,
+                                                &s_imu_context.register_value,
+                                                1U);
     }
 
     else
     {
-        /* Invalid configuration step */
+        /* Undefined configuration register */
     }
 
-    if (status == HAL_OK)
+    if (transfer_status == HAL_OK)
     {
-        s_acceleration.txDone = false;
-        s_acceleration.state = AccelerationState_ConfigBusy;
+        s_imu_context.write_finished = false;
+        s_imu_context.state = ImuState_Configuring;
         return true;
     }
 
@@ -200,25 +200,25 @@ static bool Acceleration_StartConfigStep(uint8_t step)
 }
 
 /**
- * @brief Starts a DMA read of accelerometer raw data.
+ * @brief Initiates DMA-based accelerometer data retrieval.
  *
- * @return true if the transfer was started successfully, otherwise false.
+ * @return true on successful transfer initiation, false otherwise.
  */
-static bool Acceleration_StartAccelRead(void)
+static bool Imu_InitiateAccelRetrieval(void)
 {
-    HAL_StatusTypeDef status;
+    HAL_StatusTypeDef transfer_status;
 
-    status = HAL_I2C_Mem_Read_DMA(&hi2c3,
-                                  ACC_I2C_ADDRESS,
-                                  ACC_REG_ACCEL_XOUT_H,
-                                  I2C_MEMADD_SIZE_8BIT,
-                                  s_acceleration.accelBuffer,
-                                  sizeof(s_acceleration.accelBuffer));
+    transfer_status = HAL_I2C_Mem_Read_DMA(&hi2c3,
+                                           IMU_I2C_ADDR,
+                                           IMU_REG_ACCEL_DATA_START,
+                                           I2C_MEMADD_SIZE_8BIT,
+                                           s_imu_context.accel_raw_bytes,
+                                           sizeof(s_imu_context.accel_raw_bytes));
 
-    if (status == HAL_OK)
+    if (transfer_status == HAL_OK)
     {
-        s_acceleration.rxDone = false;
-        s_acceleration.state = AccelerationState_ReadAccelBusy;
+        s_imu_context.read_finished = false;
+        s_imu_context.state = ImuState_Fetching_Accel;
         return true;
     }
 
@@ -227,25 +227,25 @@ static bool Acceleration_StartAccelRead(void)
 }
 
 /**
- * @brief Starts a DMA read of gyroscope raw data.
+ * @brief Initiates DMA-based gyroscope data retrieval.
  *
- * @return true if the transfer was started successfully, otherwise false.
+ * @return true on successful transfer initiation, false otherwise.
  */
-static bool Acceleration_StartGyroRead(void)
+static bool Imu_InitiateGyroRetrieval(void)
 {
-    HAL_StatusTypeDef status;
+    HAL_StatusTypeDef transfer_status;
 
-    status = HAL_I2C_Mem_Read_DMA(&hi2c3,
-                                  ACC_I2C_ADDRESS,
-                                  ACC_REG_GYRO_XOUT_H,
-                                  I2C_MEMADD_SIZE_8BIT,
-                                  s_acceleration.gyroBuffer,
-                                  sizeof(s_acceleration.gyroBuffer));
+    transfer_status = HAL_I2C_Mem_Read_DMA(&hi2c3,
+                                           IMU_I2C_ADDR,
+                                           IMU_REG_GYRO_DATA_START,
+                                           I2C_MEMADD_SIZE_8BIT,
+                                           s_imu_context.gyro_raw_bytes,
+                                           sizeof(s_imu_context.gyro_raw_bytes));
 
-    if (status == HAL_OK)
+    if (transfer_status == HAL_OK)
     {
-        s_acceleration.rxDone = false;
-        s_acceleration.state = AccelerationState_ReadGyroBusy;
+        s_imu_context.read_finished = false;
+        s_imu_context.state = ImuState_Fetching_Gyro;
         return true;
     }
 
@@ -253,201 +253,207 @@ static bool Acceleration_StartGyroRead(void)
     return false;
 }
 
-/** @brief Parses raw accelerometer bytes into signed axis values. */
-static void Acceleration_ParseAccel(void)
+/** @brief Converts accelerometer byte buffer to signed integer values. */
+static void Imu_TransformAccelBytes(void)
 {
-    s_acceleration.data.accelXRaw = (int16_t)((((uint16_t)s_acceleration.accelBuffer[0]) << 8U)
-                                    | ((uint16_t)s_acceleration.accelBuffer[1]));
-    s_acceleration.data.accelYRaw = (int16_t)((((uint16_t)s_acceleration.accelBuffer[2]) << 8U)
-                                    | ((uint16_t)s_acceleration.accelBuffer[3]));
-    s_acceleration.data.accelZRaw = (int16_t)((((uint16_t)s_acceleration.accelBuffer[4]) << 8U)
-                                    | ((uint16_t)s_acceleration.accelBuffer[5]));
+    s_imu_context.measurement.accelXRaw =
+        (int16_t)((((uint16_t)s_imu_context.accel_raw_bytes[0]) << 8U)
+                  | ((uint16_t)s_imu_context.accel_raw_bytes[1]));
+    s_imu_context.measurement.accelYRaw =
+        (int16_t)((((uint16_t)s_imu_context.accel_raw_bytes[2]) << 8U)
+                  | ((uint16_t)s_imu_context.accel_raw_bytes[3]));
+    s_imu_context.measurement.accelZRaw =
+        (int16_t)((((uint16_t)s_imu_context.accel_raw_bytes[4]) << 8U)
+                  | ((uint16_t)s_imu_context.accel_raw_bytes[5]));
 }
 
-/** @brief Parses raw gyroscope bytes into signed axis values. */
-static void Acceleration_ParseGyro(void)
+/** @brief Converts gyroscope byte buffer to signed integer values. */
+static void Imu_TransformGyroBytes(void)
 {
-    s_acceleration.data.gyroXRaw = (int16_t)((((uint16_t)s_acceleration.gyroBuffer[0]) << 8U)
-                                   | ((uint16_t)s_acceleration.gyroBuffer[1]));
-    s_acceleration.data.gyroYRaw = (int16_t)((((uint16_t)s_acceleration.gyroBuffer[2]) << 8U)
-                                   | ((uint16_t)s_acceleration.gyroBuffer[3]));
-    s_acceleration.data.gyroZRaw = (int16_t)((((uint16_t)s_acceleration.gyroBuffer[4]) << 8U)
-                                   | ((uint16_t)s_acceleration.gyroBuffer[5]));
+    s_imu_context.measurement.gyroXRaw =
+        (int16_t)((((uint16_t)s_imu_context.gyro_raw_bytes[0]) << 8U)
+                  | ((uint16_t)s_imu_context.gyro_raw_bytes[1]));
+    s_imu_context.measurement.gyroYRaw =
+        (int16_t)((((uint16_t)s_imu_context.gyro_raw_bytes[2]) << 8U)
+                  | ((uint16_t)s_imu_context.gyro_raw_bytes[3]));
+    s_imu_context.measurement.gyroZRaw =
+        (int16_t)((((uint16_t)s_imu_context.gyro_raw_bytes[4]) << 8U)
+                  | ((uint16_t)s_imu_context.gyro_raw_bytes[5]));
 }
 
-/** @brief Initializes the acceleration module context. */
+/** @brief Resets module context to initial state. */
 void Acceleration_Init(void)
 {
-    (void)memset(&s_acceleration, 0, sizeof(s_acceleration));
-    s_acceleration.state = AccelerationState_Off;
+    (void)memset(&s_imu_context, 0, sizeof(s_imu_context));
+    s_imu_context.state = ImuState_Powered_Off;
 }
 
-/** @brief Enables the sensor supply and prepares the module for operation. */
+/** @brief Enables power supply and prepares sensor for operation. */
 void Acceleration_MainStateInit(void)
 {
-    HAL_GPIO_WritePin(ACC_PWR_GPIO_Port, ACC_PWR_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(IMU_SUPPLY_PORT, IMU_SUPPLY_PIN, GPIO_PIN_SET);
 
-    s_acceleration.powerEnabled = true;
-    s_acceleration.state = AccelerationState_Idle;
-    s_acceleration.lastReadTick = HAL_GetTick();
+    s_imu_context.power_active = true;
+    s_imu_context.state = ImuState_Ready;
+    s_imu_context.measurement_timestamp = HAL_GetTick();
 }
 
-/** @brief Cyclic state handling of the acceleration module. */
+/** @brief Main cyclic processing routine for sensor management. */
 void Acceleration_Cyclic(void)
 {
-    uint32_t currentTick;
+    uint32_t current_timestamp;
 
-    if (s_acceleration.powerEnabled == false)
+    if (s_imu_context.power_active == false)
     {
         return;
     }
 
-    currentTick = HAL_GetTick();
+    current_timestamp = HAL_GetTick();
 
-    if ((s_acceleration.state == AccelerationState_Idle)
-            && (s_acceleration.configureRequested == true)
-            && (s_acceleration.configured == false))
+    if ((s_imu_context.state == ImuState_Ready)
+            && (s_imu_context.config_pending == true)
+            && (s_imu_context.config_done == false))
     {
-        s_acceleration.configureRequested = false;
-        s_acceleration.configStep = 0U;
-        s_acceleration.data.valid = false;
+        s_imu_context.config_pending = false;
+        s_imu_context.register_index = 0U;
+        s_imu_context.measurement.valid = false;
 
         HAL_GPIO_WritePin(LED_D0_GPIO_Port, LED_D0_Pin, GPIO_PIN_RESET);
 
-        (void)Acceleration_StartConfigStep(s_acceleration.configStep);
+        (void)Imu_InitiateRegisterWrite(s_imu_context.register_index);
     }
 
-    else if (s_acceleration.state == AccelerationState_ConfigBusy)
+    else if (s_imu_context.state == ImuState_Configuring)
     {
-        if (s_acceleration.txDone == true)
+        if (s_imu_context.write_finished == true)
         {
-            s_acceleration.txDone = false;
-            s_acceleration.configStep++;
+            s_imu_context.write_finished = false;
+            s_imu_context.register_index++;
 
-            if (s_acceleration.configStep < ACC_CONFIG_STEP_COUNT)
+            if (s_imu_context.register_index < IMU_CONFIG_REGISTER_COUNT)
             {
-                (void)Acceleration_StartConfigStep(s_acceleration.configStep);
+                (void)Imu_InitiateRegisterWrite(s_imu_context.register_index);
             }
 
             else
             {
-                s_acceleration.configured = true;
-                s_acceleration.state = AccelerationState_Idle;
-                s_acceleration.lastReadTick = currentTick;
+                s_imu_context.config_done = true;
+                s_imu_context.state = ImuState_Ready;
+                s_imu_context.measurement_timestamp = current_timestamp;
 
                 HAL_GPIO_WritePin(LED_D0_GPIO_Port, LED_D0_Pin, GPIO_PIN_SET);
             }
         }
     }
 
-    else if ((s_acceleration.state == AccelerationState_Idle)
-             && (s_acceleration.configured == true))
+    else if ((s_imu_context.state == ImuState_Ready)
+             && (s_imu_context.config_done == true))
     {
-        if ((currentTick - s_acceleration.lastReadTick) >= ACC_READ_PERIOD_MS)
+        if ((current_timestamp - s_imu_context.measurement_timestamp) >= IMU_SAMPLE_INTERVAL_MS)
         {
-            s_acceleration.lastReadTick = currentTick;
-            (void)Acceleration_StartAccelRead();
+            s_imu_context.measurement_timestamp = current_timestamp;
+            (void)Imu_InitiateAccelRetrieval();
         }
     }
 
-    else if (s_acceleration.state == AccelerationState_ReadAccelBusy)
+    else if (s_imu_context.state == ImuState_Fetching_Accel)
     {
-        if (s_acceleration.rxDone == true)
+        if (s_imu_context.read_finished == true)
         {
-            s_acceleration.rxDone = false;
-            Acceleration_ParseAccel();
-            (void)Acceleration_StartGyroRead();
+            s_imu_context.read_finished = false;
+            Imu_TransformAccelBytes();
+            (void)Imu_InitiateGyroRetrieval();
         }
     }
 
-    else if (s_acceleration.state == AccelerationState_ReadGyroBusy)
+    else if (s_imu_context.state == ImuState_Fetching_Gyro)
     {
-        if (s_acceleration.rxDone == true)
+        if (s_imu_context.read_finished == true)
         {
-            s_acceleration.rxDone = false;
-            Acceleration_ParseGyro();
+            s_imu_context.read_finished = false;
+            Imu_TransformGyroBytes();
 
-            s_acceleration.data.valid = true;
-            s_acceleration.data.sampleCounter++;
-            s_acceleration.state = AccelerationState_Idle;
+            s_imu_context.measurement.valid = true;
+            s_imu_context.measurement.sampleCounter++;
+            s_imu_context.state = ImuState_Ready;
         }
     }
 
     else
     {
-        /* No action required */
+        /* Idle state */
     }
 }
 
-/** @brief Requests sensor configuration. */
+/** @brief Signals that sensor configuration should be performed. */
 void Acceleration_RequestConfigure(void)
 {
-    if (s_acceleration.powerEnabled == false)
+    if (s_imu_context.power_active == false)
     {
         return;
     }
 
-    if (s_acceleration.configured == false)
+    if (s_imu_context.config_done == false)
     {
-        s_acceleration.configureRequested = true;
+        s_imu_context.config_pending = true;
     }
 }
 
-/** @brief Powers down the sensor and resets the module state. */
+/** @brief Disables power and resets all operational flags. */
 void Acceleration_PrepareShutdown(void)
 {
-    HAL_GPIO_WritePin(ACC_PWR_GPIO_Port, ACC_PWR_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(IMU_SUPPLY_PORT, IMU_SUPPLY_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LED_D0_GPIO_Port, LED_D0_Pin, GPIO_PIN_RESET);
 
-    s_acceleration.powerEnabled = false;
-    s_acceleration.configureRequested = false;
-    s_acceleration.configured = false;
-    s_acceleration.data.valid = false;
-    s_acceleration.state = AccelerationState_Off;
+    s_imu_context.power_active = false;
+    s_imu_context.config_pending = false;
+    s_imu_context.config_done = false;
+    s_imu_context.measurement.valid = false;
+    s_imu_context.state = ImuState_Powered_Off;
 }
 
 /**
- * @brief Returns the configuration status of the sensor.
+ * @brief Returns configuration status.
  *
- * @return true if the sensor is configured, otherwise false.
+ * @return true if sensor configuration is complete, false otherwise.
  */
 bool Acceleration_IsConfigured(void)
 {
-    return s_acceleration.configured;
+    return s_imu_context.config_done;
 }
 
 /**
- * @brief Returns the latest sensor data.
+ * @brief Provides access to latest measurement data.
  *
- * @return Pointer to the internal data structure.
+ * @return Pointer to internal measurement structure.
  */
 Acceleration_Data const* Acceleration_GetData(void)
 {
-    return &s_acceleration.data;
+    return &s_imu_context.measurement;
 }
 
 /**
- * @brief HAL callback for completed I2C memory write DMA transfers.
+ * @brief HAL callback triggered on DMA write completion.
  *
- * @param hi2c Pointer to the I2C handle.
+ * @param hi2c Pointer to I2C interface handle.
  */
 void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
     if ((hi2c != NULL) && (hi2c->Instance == I2C3))
     {
-        s_acceleration.txDone = true;
+        s_imu_context.write_finished = true;
     }
 }
 
 /**
- * @brief HAL callback for completed I2C memory read DMA transfers.
+ * @brief HAL callback triggered on DMA read completion.
  *
- * @param hi2c Pointer to the I2C handle.
+ * @param hi2c Pointer to I2C interface handle.
  */
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
     if ((hi2c != NULL) && (hi2c->Instance == I2C3))
     {
-        s_acceleration.rxDone = true;
+        s_imu_context.read_finished = true;
     }
 }

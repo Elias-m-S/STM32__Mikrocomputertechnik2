@@ -6,8 +6,8 @@
  */
 
 /*******************************************************************************
-* Includes
-*******************************************************************************/
+ * Includes
+ *******************************************************************************/
 
 #include <stdbool.h>
 
@@ -23,41 +23,42 @@
 #include "main.h"
 
 /*******************************************************************************
-* Defines
-*******************************************************************************/
+ * Defines
+ *******************************************************************************/
 
 /** @brief Toggle period in milliseconds for 1 Hz LED blinking. */
-#define RUN_LED_TOGGLE_TICKS   500U
+#define RUN_LED_TOGGLE   500U
 
 /*******************************************************************************
-* Local Types and Typedefs
-*******************************************************************************/
+ * Local Types and Typedefs
+ *******************************************************************************/
 
 /*******************************************************************************
-* Global Variables
-*******************************************************************************/
+ * Global Variables
+ *******************************************************************************/
 
 /*******************************************************************************
-* Static Function Prototypes
-*******************************************************************************/
+ * Static Function Prototypes
+ *******************************************************************************/
 
 static bool RunState_Cyclic_SelfTest(RunState const* pRunState, bool* pError);
 static void RunState_Cyclic_Running(RunState* const pRunState);
+static void RunState_Cyclic_Running_HandleLED_D1(uint32_t currentTick);
 static void RunState_Cyclic_Error(RunState const* pRunState);
 
 /*******************************************************************************
-* Static Variables
-*******************************************************************************/
+ * Static Variables
+ *******************************************************************************/
 
 /** @brief Last tick used for LED toggling in run mode. */
 static uint32_t s_lastToggleTick = 0U;
 
 /** @brief Last sampled state of switch SW2 for edge detection. */
-static GPIO_PinState s_lastSw2State = GPIO_PIN_RESET;
+static GPIO_PinState SW2_LAST_STATE = GPIO_PIN_RESET;
 
 /*******************************************************************************
-* Functions
-*******************************************************************************/
+ * Functions
+ *******************************************************************************/
 
 /**
  * @brief Processes the self-test phase of the run state.
@@ -107,36 +108,40 @@ static void RunState_Cyclic_Running(RunState* const pRunState)
 
     currentTick = HAL_GetTick();
 
-    /* Blink LED D1 with 1 Hz in RUN mode */
-    if ((currentTick - s_lastToggleTick) >= RUN_LED_TOGGLE_TICKS)
-    {
-        s_lastToggleTick = currentTick;
-        HAL_GPIO_TogglePin(LED_D1_GPIO_Port, LED_D1_Pin);
-    }
+    /* --- LED Handling --- */
+    RunState_Cyclic_Running_HandleLED_D1(currentTick);
 
-    /* Detect SW2 press edge in RUN state */
+    /* --- User Input Handling --- */
     sw2State = HAL_GPIO_ReadPin(SW_2_GPIO_Port, SW_2_Pin);
 
-    if ((s_lastSw2State == GPIO_PIN_SET) && (sw2State == GPIO_PIN_RESET))
+    if ((SW2_LAST_STATE == GPIO_PIN_SET) && (sw2State == GPIO_PIN_RESET))
     {
         Acceleration_RequestConfigure();
     }
 
-    s_lastSw2State = sw2State;
+    SW2_LAST_STATE = sw2State;
 
-    /* Process persistent runtime handling */
+    /* --- Module Processing --- */
     Storage_Cyclic();
-
-    /* Process acceleration sensor */
     Acceleration_Cyclic();
-
-    /* Process data formatting and UART transmission */
     Processing_Cyclic();
-
-    /* Process power mode logic */
     PowerModes_Cyclic();
+
 }
 
+/**
+ * @brief Blinks LED D1 at 1 Hz in RUN mode.
+ *
+ * @param currentTick Current system tick in milliseconds.
+ */
+static void RunState_Cyclic_Running_HandleLED_D1(uint32_t currentTick)
+{
+    if ((currentTick - s_lastToggleTick) >= RUN_LED_TOGGLE)
+    {
+        s_lastToggleTick = currentTick;
+        HAL_GPIO_TogglePin(LED_D1_GPIO_Port, LED_D1_Pin);
+    }
+}
 /**
  * @brief Handles the error state.
  *
@@ -144,7 +149,7 @@ static void RunState_Cyclic_Running(RunState* const pRunState)
  */
 static void RunState_Cyclic_Error(RunState const* pRunState)
 {
-    (void)pRunState;
+    (void) pRunState;
     assert_param(0);
 }
 
@@ -168,6 +173,12 @@ void RunState_Init(RunState* const pThis)
 
     /* Initialize dependent modules */
     DrvCrc_Init(pThis->pCfg->pDrvCrc);
+    /* Initialize logical sensor state before enabling supply */
+    Acceleration_Init();
+
+    /* Enable GY-521 supply from MainState_Init context */
+    Acceleration_MainStateInit();
+
     PowerModes_Init();
     Processing_Init();
 
@@ -175,7 +186,7 @@ void RunState_Init(RunState* const pThis)
     pThis->data.cycleCounter = 0U;
 
     s_lastToggleTick = HAL_GetTick();
-    s_lastSw2State = HAL_GPIO_ReadPin(SW_2_GPIO_Port, SW_2_Pin);
+    SW2_LAST_STATE = HAL_GPIO_ReadPin(SW_2_GPIO_Port, SW_2_Pin);
 
     pThis->initialized = true;
 }
