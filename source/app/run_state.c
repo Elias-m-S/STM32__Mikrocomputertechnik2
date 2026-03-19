@@ -101,32 +101,24 @@ static bool RunState_Cyclic_SelfTest(RunState const* pRunState, bool* pError)
  */
 static void RunState_Cyclic_Running(RunState* const pRunState)
 {
-    uint32_t currentTick;
-    GPIO_PinState sw2State;
-
     assert_param(pRunState != NULL);
 
-    currentTick = HAL_GetTick();
+    uint32_t tick = HAL_GetTick();
+    RunState_Cyclic_Running_HandleLED_D1(tick);
 
-    /* --- LED Handling --- */
-    RunState_Cyclic_Running_HandleLED_D1(currentTick);
+    GPIO_PinState currentPin = HAL_GPIO_ReadPin(SW_2_GPIO_Port, SW_2_Pin);
 
-    /* --- User Input Handling --- */
-    sw2State = HAL_GPIO_ReadPin(SW_2_GPIO_Port, SW_2_Pin);
-
-    if ((SW2_LAST_STATE == GPIO_PIN_SET) && (sw2State == GPIO_PIN_RESET))
+    if (SW2_LAST_STATE != currentPin && currentPin == GPIO_PIN_RESET)
     {
         Acceleration_RequestConfigure();
     }
 
-    SW2_LAST_STATE = sw2State;
+    SW2_LAST_STATE = currentPin;
 
-    /* --- Module Processing --- */
-    Storage_Cyclic();
-    Acceleration_Cyclic();
-    Processing_Cyclic();
     PowerModes_Cyclic();
-
+    Processing_Cyclic();
+    Acceleration_Cyclic();
+    Storage_Cyclic();
 }
 
 /**
@@ -173,14 +165,9 @@ void RunState_Init(RunState* const pThis)
 
     /* Initialize dependent modules */
     DrvCrc_Init(pThis->pCfg->pDrvCrc);
-    /* Initialize logical sensor state before enabling supply */
-    Acceleration_Init();
 
-    /* Enable GY-521 supply from MainState_Init context */
-    Acceleration_MainStateInit();
-
-    PowerModes_Init();
-    Processing_Init();
+    PowerModes_Init(); /* Initialize power mode management (e.g., button state) */
+    Processing_Init(); /* Initialize serial output module */
 
     pThis->data.state = RunState_SelfTest;
     pThis->data.cycleCounter = 0U;
@@ -212,6 +199,7 @@ void RunState_Cyclic(RunState* const pThis)
 
             else
             {
+                /*Self test passed - initialize storage */
                 Storage_Init();
                 Storage_MainStateInit();
 

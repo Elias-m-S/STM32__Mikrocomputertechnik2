@@ -65,7 +65,8 @@ void MainState_Init(MainState* const pThis)
     /* Construct all modules */
     CtorAll_Construct(pThis);
 
-    /* Enable VCC for Accelerometer */
+    Acceleration_Init(); /* Initialize Accelerometer (Needs to happen before Acc_Mainstate_Init)*/
+    /* Enable VCC for Accelerometer (SW21)*/
     Acceleration_MainStateInit();
 
     RunState_Init(pThis->pCfg->pRunState);
