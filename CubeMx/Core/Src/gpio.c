@@ -53,16 +53,16 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIO_OUTPUT_DEBUG_LED_GPIO_Port, GPIO_OUTPUT_DEBUG_LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5|LED_D2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, ACCELEROMETER_VCC_Pin|LED_D2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, LED_D1_Pin|LED_D0_Pin|LED_D3_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PC13 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  /*Configure GPIO pin : PtPin */
+  GPIO_InitStruct.Pin = B1_USER_BUTTON_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  HAL_GPIO_Init(B1_USER_BUTTON_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PtPin */
   GPIO_InitStruct.Pin = GPIO_OUTPUT_DEBUG_LED_Pin;
@@ -71,8 +71,8 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIO_OUTPUT_DEBUG_LED_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PC5 PCPin */
-  GPIO_InitStruct.Pin = GPIO_PIN_5|LED_D2_Pin;
+  /*Configure GPIO pins : PCPin PCPin */
+  GPIO_InitStruct.Pin = ACCELEROMETER_VCC_Pin|LED_D2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -84,12 +84,6 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PtPin */
-  GPIO_InitStruct.Pin = SW_1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(SW_1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PtPin */
   GPIO_InitStruct.Pin = SW_2_Pin;
