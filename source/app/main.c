@@ -1,10 +1,10 @@
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  ******************************************************************************
-*/
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ ******************************************************************************
+ */
 
 /* Includes ------------------------------------------------------------------*/
 
@@ -23,49 +23,50 @@
 #include "stm32g4xx_hal_rtc_ex.h"
 
 /*******************************************************************************
-* Defines
-*******************************************************************************/
+ * Defines
+ *******************************************************************************/
 
 /*******************************************************************************
-* Local Types and Typedefs
-*******************************************************************************/
+ * Local Types and Typedefs
+ *******************************************************************************/
 
 /*******************************************************************************
-* Global Variables
-*******************************************************************************/
+ * Global Variables
+ *******************************************************************************/
 
 /*******************************************************************************
-* Static Variables
-*******************************************************************************/
+ * Static Variables
+ *******************************************************************************/
 
 /** @brief Global application main state instance. */
 static MainState s_mainState;
 
 /*******************************************************************************
-* Static Function Prototypes
-*******************************************************************************/
+ * Static Function Prototypes
+ *******************************************************************************/
 
 /**
-  * @brief System Clock Configuration
-  */
+ * @brief System Clock Configuration
+ */
 void SystemClock_Config(void)
 {
-    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+    RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
+    RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
 
     /** Configure the main internal regulator output voltage
-    */
+     */
     HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1_BOOST);
 
     /** Configure LSE drive capability
-    */
+     */
     HAL_PWR_EnableBkUpAccess();
     __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
 
     /** Initializes the RCC Oscillators according to the specified parameters
-    * in the RCC_OscInitTypeDef structure.
-    */
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI | RCC_OSCILLATORTYPE_LSE;
+     * in the RCC_OscInitTypeDef structure.
+     */
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI
+                                       | RCC_OSCILLATORTYPE_LSE;
     RCC_OscInitStruct.LSEState = RCC_LSE_ON;
     RCC_OscInitStruct.HSIState = RCC_HSI_ON;
     RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
@@ -83,7 +84,7 @@ void SystemClock_Config(void)
     }
 
     /** Initializes the CPU, AHB and APB buses clocks
-    */
+     */
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
                                   | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
@@ -114,17 +115,16 @@ static void MX_TIM_Init(void)
  */
 static void MX_ADC_Init(void)
 {
-    /* Not used in the final program design */
 }
 
 /*******************************************************************************
-* Public Functions
-*******************************************************************************/
+ * Public Functions
+ *******************************************************************************/
 
 /**
-  * @brief  Main program entry
-  * @retval int
-  */
+ * @brief  Main program entry
+ * @retval int
+ */
 int main(void)
 {
     /* Reset of all peripherals, initializes the Flash interface and the Systick. */
@@ -133,7 +133,7 @@ int main(void)
     /* Stop timers and RTC while debugging */
     DBGMCU->APB1FZR1 |= DBGMCU_APB1FZR1_DBG_TIM2_STOP;
     DBGMCU->APB1FZR1 |= DBGMCU_APB1FZR1_DBG_RTC_STOP;
-    DBGMCU->APB2FZ   |= DBGMCU_APB2FZ_DBG_TIM1_STOP;
+    DBGMCU->APB2FZ |= DBGMCU_APB2FZ_DBG_TIM1_STOP;
 
     /* Configure the system clock */
     SystemClock_Config();
@@ -160,8 +160,8 @@ int main(void)
 }
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  */
+ * @brief  This function is executed in case of error occurrence.
+ */
 void Error_Handler(void)
 {
     __disable_irq();
@@ -173,15 +173,15 @@ void Error_Handler(void)
 
 #ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file Pointer to the source file name
-  * @param  line Source line number
-  * @retval None
-  */
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file Pointer to the source file name
+ * @param  line Source line number
+ * @retval None
+ */
 void assert_failed(uint8_t* file, uint32_t line)
 {
-    (void)file;
-    (void)line;
+    (void) file;
+    (void) line;
 }
 #endif /* USE_FULL_ASSERT */

@@ -7,8 +7,8 @@
  */
 
 /*******************************************************************************
-* Includes
-*******************************************************************************/
+ * Includes
+ *******************************************************************************/
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -23,8 +23,8 @@
 #include "wait_state.h"
 
 /*******************************************************************************
-* Defines
-*******************************************************************************/
+ * Defines
+ *******************************************************************************/
 
 /*! Number of LEDs configured as DrvGpio objects */
 #define NUMBER_OF_LEDS 					1u
@@ -34,12 +34,12 @@
 #define BLINKY_CYCLE_MAIN_CYCLE_COUNT 	500UL
 
 /*******************************************************************************
-* Local Types and Typedefs
-*******************************************************************************/
+ * Local Types and Typedefs
+ *******************************************************************************/
 
 /*******************************************************************************
-* Global Variables
-*******************************************************************************/
+ * Global Variables
+ *******************************************************************************/
 
 /*! Declaration of Start Range for CRC calculation */
 extern const uint32_t __START_CRC_FLASH[];
@@ -48,12 +48,12 @@ extern const uint32_t __START_CRC_FLASH[];
 extern const uint32_t __END_CRC_FLASH[];
 
 /*******************************************************************************
-* Static Function Prototypes
-*******************************************************************************/
+ * Static Function Prototypes
+ *******************************************************************************/
 
 /*******************************************************************************
-* Static Variables
-*******************************************************************************/
+ * Static Variables
+ *******************************************************************************/
 
 /*!
  * \brief Constructs all members of RunState
@@ -64,21 +64,15 @@ static void CtorAll_RunState(RunState* const pThis)
 {
     static DrvCrc m_drvCrc;
 
-    static DrvCrcCfg m_drvCrcCfg =
-    {
-        .pHdma = &hdma_memtomem_dma1_channel1,
-        .pHcrc = &hcrc,
-        .dstAddress = (uint32_t) &CRC->DR,
-        .isHardwareCrc = true,
-        .crcRangeStartAddress = (const uint32_t)__START_CRC_FLASH,
-        .crcRangeEndAddress = (const uint32_t)__END_CRC_FLASH,
-        .pCrcAddress = (const uint32_t*)__END_CRC_FLASH
-    };
+    static DrvCrcCfg m_drvCrcCfg = { .pHdma = &hdma_memtomem_dma1_channel1,
+                                     .pHcrc = &hcrc, .dstAddress = (uint32_t) &CRC->DR, .isHardwareCrc =
+                                         true, .crcRangeStartAddress =
+                                         (const uint32_t) __START_CRC_FLASH, .crcRangeEndAddress =
+                                         (const uint32_t) __END_CRC_FLASH, .pCrcAddress =
+                                         (const uint32_t*) __END_CRC_FLASH
+                                   };
 
-    static RunStateConfig m_runStateCfg =
-    {
-        .pDrvCrc =  &m_drvCrc,
-    };
+    static RunStateConfig m_runStateCfg = { .pDrvCrc = &m_drvCrc, };
 
     DrvCrc_Construct(&m_drvCrc, &m_drvCrcCfg);
 
@@ -94,30 +88,25 @@ static void CtorAll_WaitState(WaitState* const pThis)
 {
     static DrvTimer m_waitStateTimer;
 
-    static DrvTimerCfg m_waitStateTimerCfg =
-    {
-        .pTim = &htim1,
+    static DrvTimerCfg m_waitStateTimerCfg = { .pTim = &htim1,
 
-        .type = DrvTimer_UsTimer,
+                                               .type = DrvTimer_UsTimer,
 
-        .ticksPerSecond = 1000000UL,
+                                               .ticksPerSecond = 1000000UL,
 
-        .waitTimeInit = 0UL,
-    };
+                                               .waitTimeInit = 0UL,
+                                             };
 
     DrvTimer_Construct(&m_waitStateTimer, &m_waitStateTimerCfg);
 
-    static WaitStateCfg m_waitStateCfg =
-    {
-        .pDrvTimer = &m_waitStateTimer,
-    };
+    static WaitStateCfg m_waitStateCfg = { .pDrvTimer = &m_waitStateTimer, };
 
     WaitState_Construct(pThis, &m_waitStateCfg);
 }
 
 /*******************************************************************************
-* Functions
-*******************************************************************************/
+ * Functions
+ *******************************************************************************/
 
 void CtorAll_Construct(MainState* const pThis)
 {
@@ -125,11 +114,9 @@ void CtorAll_Construct(MainState* const pThis)
 
     static WaitState m_waitState;
 
-    static MainStateConfig m_mainStateCfg =
-    {
-        .pRunState = &m_runState,
-        .pWaitState = &m_waitState,
-    };
+    static MainStateConfig m_mainStateCfg = { .pRunState = &m_runState,
+                                              .pWaitState = &m_waitState,
+                                            };
 
     CtorAll_RunState(&m_runState);
     CtorAll_WaitState(&m_waitState);

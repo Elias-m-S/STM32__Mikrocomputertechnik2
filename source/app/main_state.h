@@ -10,20 +10,20 @@
 #define MAIN_STATE_H_
 
 /*******************************************************************************
-* Includes
-*******************************************************************************/
+ * Includes
+ *******************************************************************************/
 #include <stdbool.h>
 
 #include "run_state.h"
 #include "wait_state.h"
 
 /*******************************************************************************
-* Exported Defines
-*******************************************************************************/
+ * Exported Defines
+ *******************************************************************************/
 
 /*******************************************************************************
-* Exported Types and Typedefs
-*******************************************************************************/
+ * Exported Types and Typedefs
+ *******************************************************************************/
 
 /*! Enumeration of Main State Values */
 typedef enum
@@ -80,12 +80,12 @@ typedef struct
 } MainState;
 
 /*******************************************************************************
-* Global Variables
-*******************************************************************************/
+ * Global Variables
+ *******************************************************************************/
 
 /*******************************************************************************
-* Exported Functions
-*******************************************************************************/
+ * Exported Functions
+ *******************************************************************************/
 
 /*!
  * \brief Function constructs the \ref MainState object
@@ -93,7 +93,8 @@ typedef struct
  * \param pThis Pointer to \ref MainState
  * \param pCfg Pointer to \ref MainStateConfig
  */
-void MainState_Construct(MainState* const pThis, MainStateConfig const* const pCfg);
+void MainState_Construct(MainState* const pThis,
+                         MainStateConfig const* const pCfg);
 
 /*!
  * \brief Function initializes the \ref MainState object

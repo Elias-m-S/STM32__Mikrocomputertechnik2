@@ -1,10 +1,11 @@
 /******************************************************************************
  * @file    powermodes.c
- * @brief   System power state management and shutdown control
+ * @brief   Power mode handling
  ******************************************************************************/
 
 /***** Includes **************************************************************/
 #include "powermodes.h"
+
 #include "stm32g4xx_hal.h"
 #include "stm32g4xx_hal_pwr_ex.h"
 #include "stm32g4xx_hal_rtc_ex.h"
@@ -15,107 +16,105 @@
 
 /***** Defines ***************************************************************/
 
-#define WAKEUP_TIMEOUT_SEC             10U
-#define RTC_TIMER_PRESCALER            RTC_WAKEUPCLOCK_CK_SPRE_16BITS
+#define POWERMODES_WAKEUP_TIME_S      10U
+#define POWERMODES_RTC_CLOCK_DIVIDER  RTC_WAKEUPCLOCK_CK_SPRE_16BITS
 
 /***** Local Types ***********************************************************/
 
 typedef enum
 {
-    ButtonState_Idle = 0,
-    ButtonState_Released,
-    ButtonState_Pressed
-} ButtonSequenceState;
+    PowerMode_WaitFirstRelease = 0, /*!< Wait for first button release */
+    PowerMode_WaitSecondPress, /*!< Wait for second button press */
+    PowerMode_WaitSecondRelease /*!< Wait for second button release -> shutdown */
+} PowerMode_State;
 
 /***** Static Function Prototypes ********************************************/
 
-static void EnterLowPowerMode(void);
-static void HandleWakeupIndicators(void);
+static void PowerModes_EnterShutdown(void);
 
 /***** Static Variables ******************************************************/
 
-static ButtonSequenceState g_buttonSequence = ButtonState_Idle;
+static PowerMode_State s_state = PowerMode_WaitFirstRelease;
 
 /***** Public Functions ******************************************************/
 
 /*!
- * @brief Initialize power mode management and detect wakeup source.
- */
-/*!
- * @brief Initialize power mode management and detect wakeup source.
+ * @brief Initialize power mode module and evaluate wakeup source.
+ *
  */
 void PowerModes_Init(void)
 {
-    /* Only reset button sequence on cold start, NOT on wakeup */
-    if ((__HAL_PWR_GET_FLAG(PWR_FLAG_SB) == 0U) &&
-            (__HAL_PWR_GET_FLAG(PWR_FLAG_WUF2) == 0U) &&
-            ((RTC->SR & RTC_SR_WUTF) == 0U))
-    {
-        /* Cold start - reset button state */
-        g_buttonSequence = ButtonState_Idle;
-    }
+    bool wokeFromShutdown;
+    bool wokeByButton;
+    bool wokeByRtc;
 
-    else
-    {
-        /* Wakeup - keep button state for consistency */
-        g_buttonSequence = ButtonState_Idle;  /* Reset nach Wakeup, bereit für neuen 2-Click */
-    }
+    /* Disable RTC wakeup timer - reconfigured before next shutdown */
+    (void) HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
 
-    /* Disable any active RTC wakeup timer */
-    (void)HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
+    /* Read wakeup flags before clearing them */
+    wokeFromShutdown = (__HAL_PWR_GET_FLAG(PWR_FLAG_SB) != 0U);
+    wokeByButton = (__HAL_PWR_GET_FLAG(PWR_FLAG_WUF2) != 0U);
+    wokeByRtc = ((RTC->SR & RTC_SR_WUTF) != 0U);
 
-    /* Clear all LED indicators first */
+    /* Turn off all LEDs */
     HAL_GPIO_WritePin(LED_D0_GPIO_Port, LED_D0_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LED_D1_GPIO_Port, LED_D1_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LED_D2_GPIO_Port, LED_D2_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LED_D3_GPIO_Port, LED_D3_Pin, GPIO_PIN_RESET);
 
-    /* Set LED indicators based on wakeup source */
-    HandleWakeupIndicators();
+    if ((wokeFromShutdown == true) && (wokeByButton == true))
+    {
+        /* Button wakeup: LED D2 on, skip first release */
+        HAL_GPIO_WritePin(LED_D2_GPIO_Port, LED_D2_Pin, GPIO_PIN_SET);
+        s_state = PowerMode_WaitSecondPress;
+    }
 
-    /* Clear wakeup flags for next cycle */
+    else if ((wokeFromShutdown == true) && (wokeByRtc == true))
+    {
+        /* RTC wakeup: LED D3 on */
+        HAL_GPIO_WritePin(LED_D3_GPIO_Port, LED_D3_Pin, GPIO_PIN_SET);
+        s_state = PowerMode_WaitFirstRelease;
+    }
+
+    else
+    {
+        /* Normal power-on or pin reset */
+        s_state = PowerMode_WaitFirstRelease;
+    }
+
+    /* Clear all wakeup flags */
     RTC->SCR = RTC_SCR_CWUTF;
     __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WUF2);
     __HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
 }
 
-
 /*!
- * @brief Process power mode cyclic operations.
- */
-void PowerModes_Cyclic(void)
-{
-    /* Placeholder for future power management tasks */
-}
-
-/*!
- * @brief Handle button state change for power mode transitions.
+ * @brief Process a button press or release event (called from EXTI ISR).
  *
- * @param isPressed Current button press state.
  */
-void PowerModes_ButtonEvent(bool isPressed)
+void PowerModes_ButtonEvent(bool pressed)
 {
-    if (g_buttonSequence == ButtonState_Idle)
+    if (s_state == PowerMode_WaitFirstRelease)
     {
-        if (isPressed == false)
+        if (pressed == false)
         {
-            g_buttonSequence = ButtonState_Released;
+            s_state = PowerMode_WaitSecondPress;
         }
     }
 
-    else if (g_buttonSequence == ButtonState_Released)
+    else if (s_state == PowerMode_WaitSecondPress)
     {
-        if (isPressed == true)
+        if (pressed == true)
         {
-            g_buttonSequence = ButtonState_Pressed;
+            s_state = PowerMode_WaitSecondRelease;
         }
     }
 
-    else if (g_buttonSequence == ButtonState_Pressed)
+    else /* PowerMode_WaitSecondRelease */
     {
-        if (isPressed == false)
+        if (pressed == false)
         {
-            EnterLowPowerMode();
+            PowerModes_EnterShutdown();
         }
     }
 }
@@ -123,84 +122,50 @@ void PowerModes_ButtonEvent(bool isPressed)
 /***** Static Functions ******************************************************/
 
 /*!
- * @brief Detect wakeup source and illuminate corresponding LED.
+ * @brief Perform a clean transition into STM32G4 Shutdown mode.
  */
-static void HandleWakeupIndicators(void)
+static void PowerModes_EnterShutdown(void)
 {
-    bool systemWokeFromShutdown;
-    bool wakeSourceButton;
-    bool wakeSourceTimer;
-
-    systemWokeFromShutdown = (__HAL_PWR_GET_FLAG(PWR_FLAG_SB) != 0U);
-    wakeSourceButton = (__HAL_PWR_GET_FLAG(PWR_FLAG_WUF2) != 0U);
-    wakeSourceTimer = ((RTC->SR & RTC_SR_WUTF) != 0U);
-
-    if ((systemWokeFromShutdown == true) && (wakeSourceButton == true))
-    {
-        /* LED D2: Woken by button press */
-        HAL_GPIO_WritePin(LED_D2_GPIO_Port, LED_D2_Pin, GPIO_PIN_SET);
-    }
-
-    else if ((systemWokeFromShutdown == true) && (wakeSourceTimer == true))
-    {
-        /* LED D3: Woken by RTC timeout */
-        HAL_GPIO_WritePin(LED_D3_GPIO_Port, LED_D3_Pin, GPIO_PIN_SET);
-    }
-
-    else
-    {
-        /* Cold start or other wakeup source */
-    }
-}
-
-/*!
- * @brief Gracefully shutdown system and enter low power state.
- *
- * Performs final cleanup, disables peripherals, and transitions to shutdown mode.
- */
-static void EnterLowPowerMode(void)
-{
-    /* Save runtime metrics before power down */
+    /* Persist runtime data and disable sensor supply */
     Storage_PrepareShutdown();
+    Acceleration_Shutdown();
 
-    /* Disable sensor power supply */
-    Acceleration_PrepareShutdown();
-
-    /* Turn off all indicator LEDs */
+    /* Turn off all LEDs */
     HAL_GPIO_WritePin(LED_D0_GPIO_Port, LED_D0_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LED_D1_GPIO_Port, LED_D1_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LED_D2_GPIO_Port, LED_D2_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LED_D3_GPIO_Port, LED_D3_Pin, GPIO_PIN_RESET);
 
-    /* Reset button state machine */
-    g_buttonSequence = ButtonState_Idle;
+    /* Reset state machine for the next wakeup session */
+    s_state = PowerMode_WaitFirstRelease;
 
-    /* Deactivate any pending RTC wakeup */
-    (void)HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
-
-    /* Clear all pending wakeup flags */
+    /* Deactivate RTC wakeup timer and clear all flags */
+    (void) HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
     RTC->SCR = RTC_SCR_CWUTF;
     __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WUF2);
     __HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
 
-    /* Configure GPIO pulldown on wakeup pin for stable voltage */
+    /* WKUP2 (PC13): pull-down keeps line LOW during Shutdown;
+     * HIGH polarity wakes on button release (rising edge). */
     HAL_PWREx_EnableGPIOPullDown(PWR_GPIO_C, PWR_GPIO_BIT_13);
     HAL_PWREx_EnablePullUpPullDownConfig();
-
-    /* Enable wakeup from button on PWR_WAKEUP_PIN2 (high level) */
     HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN2_HIGH);
 
-    /* Arm RTC timer for automatic wakeup after timeout */
+    /* Clear WUF2 again - EnableWakeUpPin sets it immediately because
+     * PC13 is already HIGH when called from the release callback. */
+    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WUF2);
+
+    /* Arm RTC wakeup timer (WUTIE required to exit Shutdown, see RM0440 Table 337) */
     if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc,
-                                    WAKEUP_TIMEOUT_SEC,
-                                    RTC_TIMER_PRESCALER) != HAL_OK)
+                                    POWERMODES_WAKEUP_TIME_S,
+                                    POWERMODES_RTC_CLOCK_DIVIDER) != HAL_OK)
     {
         Error_Handler();
     }
 
-    /* Enter shutdown mode - system will not resume from this point */
+    /* Enter Shutdown - SRAM content lost */
     HAL_PWREx_EnterSHUTDOWNMode();
 
-    /* Force system reset on wakeup */
+    /* Should never be reached */
     HAL_NVIC_SystemReset();
 }

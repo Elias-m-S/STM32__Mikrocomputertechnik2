@@ -10,20 +10,20 @@
 #define RUN_STATE_H_
 
 /*******************************************************************************
-* Includes
-*******************************************************************************/
+ * Includes
+ *******************************************************************************/
 #include <stdbool.h>
 
 #include "driver_crc.h"
 #include "driver_timer.h"
 
 /*******************************************************************************
-* Exported Defines
-*******************************************************************************/
+ * Exported Defines
+ *******************************************************************************/
 
 /*******************************************************************************
-* Exported Types and Typedefs
-*******************************************************************************/
+ * Exported Types and Typedefs
+ *******************************************************************************/
 
 /*! Enumeration of Main State Values */
 typedef enum
@@ -78,12 +78,12 @@ typedef struct
 } RunState;
 
 /*******************************************************************************
-* Global Variables
-*******************************************************************************/
+ * Global Variables
+ *******************************************************************************/
 
 /*******************************************************************************
-* Exported Functions
-*******************************************************************************/
+ * Exported Functions
+ *******************************************************************************/
 
 /*!
  * \brief Function constructs the \ref RunState object
@@ -91,7 +91,8 @@ typedef struct
  * \param pThis Pointer to \ref RunState
  * \param pCfg Pointer to \ref RunStateConfig
  */
-void RunState_Construct(RunState* const pThis, RunStateConfig const* const pCfg);
+void RunState_Construct(RunState* const pThis,
+                        RunStateConfig const* const pCfg);
 
 /*!
  * \brief Function initalizes the \ref RunState object

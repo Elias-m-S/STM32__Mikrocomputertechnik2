@@ -312,13 +312,14 @@ void I2C3_EV_IRQHandler(void)
   */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+    /* Prüfen, ob der Interrupt vom User-Button (Pin 13) ausgelöst wurde */
     if (GPIO_Pin == GPIO_PIN_13)
     {
-        GPIO_PinState state = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
-        bool pressed = (state == GPIO_PIN_SET);
+        /* Aktuellen Zustand einlesen: LOW (RESET) bedeutet gedrückt */
+        bool pressed = (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_RESET);
 
+        /* Zustand an deine State-Machine weitergeben */
         PowerModes_ButtonEvent(pressed);
     }
 }
-
 /* USER CODE END 1 */

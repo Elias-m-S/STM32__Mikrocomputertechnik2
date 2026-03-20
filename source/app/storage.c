@@ -4,8 +4,8 @@
  */
 
 /*******************************************************************************
-* Includes
-*******************************************************************************/
+ * Includes
+ *******************************************************************************/
 
 #include "storage.h"
 
@@ -16,8 +16,8 @@
 #include "crc.h"
 
 /*******************************************************************************
-* Defines
-*******************************************************************************/
+ * Defines
+ *******************************************************************************/
 
 /** @brief Virtual EEPROM key for boot sequence counter. */
 #define NVRAM_KEY_BOOT_COUNT              1U
@@ -29,8 +29,8 @@
 #define NVRAM_FLUSH_INTERVAL_MS           5000UL
 
 /*******************************************************************************
-* Local Types and Typedefs
-*******************************************************************************/
+ * Local Types and Typedefs
+ *******************************************************************************/
 
 /** @brief Persistent data manager context. */
 typedef struct
@@ -52,23 +52,23 @@ typedef struct
 } PersistentData_Manager;
 
 /*******************************************************************************
-* Static Function Prototypes
-*******************************************************************************/
+ * Static Function Prototypes
+ *******************************************************************************/
 
 static void PersistentData_InitializePartition(void);
 static uint32_t PersistentData_FetchValue(uint16_t key);
 static void PersistentData_StoreValue(uint16_t key, uint32_t val);
 
 /*******************************************************************************
-* Static Variables
-*******************************************************************************/
+ * Static Variables
+ *******************************************************************************/
 
 /** @brief Global persistent data manager instance. */
 static PersistentData_Manager g_persistMgr;
 
 /*******************************************************************************
-* Functions
-*******************************************************************************/
+ * Functions
+ *******************************************************************************/
 
 /** @brief Initializes the EEPROM partition if needed or repairs corruption. */
 static void PersistentData_InitializePartition(void)
@@ -92,7 +92,7 @@ static void PersistentData_InitializePartition(void)
 
         if (initStatus != EE_OK)
         {
-            (void)HAL_FLASH_Lock();
+            (void) HAL_FLASH_Lock();
             Error_Handler();
         }
     }
@@ -103,7 +103,7 @@ static void PersistentData_InitializePartition(void)
 
         if (initStatus != EE_OK)
         {
-            (void)HAL_FLASH_Lock();
+            (void) HAL_FLASH_Lock();
             Error_Handler();
         }
 
@@ -116,7 +116,7 @@ static void PersistentData_InitializePartition(void)
 
         if (initStatus != EE_OK)
         {
-            (void)HAL_FLASH_Lock();
+            (void) HAL_FLASH_Lock();
             Error_Handler();
         }
     }
@@ -181,7 +181,7 @@ static void PersistentData_StoreValue(uint16_t key, uint32_t val)
 
         if (storeStatus != EE_OK)
         {
-            (void)HAL_FLASH_Lock();
+            (void) HAL_FLASH_Lock();
             Error_Handler();
         }
 
@@ -202,7 +202,7 @@ static void PersistentData_StoreValue(uint16_t key, uint32_t val)
 /** @brief Prepares persistent data manager for operation. */
 void Storage_Init(void)
 {
-    (void)memset(&g_persistMgr, 0, sizeof(g_persistMgr));
+    (void) memset(&g_persistMgr, 0, sizeof(g_persistMgr));
     g_persistMgr.isReady = true;
 }
 
@@ -219,7 +219,8 @@ void Storage_MainStateInit(void)
     PersistentData_InitializePartition();
 
     g_persistMgr.bootCount = PersistentData_FetchValue(NVRAM_KEY_BOOT_COUNT);
-    g_persistMgr.execTimeMs = PersistentData_FetchValue(NVRAM_KEY_EXEC_TIME_MILLIS);
+    g_persistMgr.execTimeMs = PersistentData_FetchValue(
+                                  NVRAM_KEY_EXEC_TIME_MILLIS);
 
     g_persistMgr.bootCount++;
     PersistentData_StoreValue(NVRAM_KEY_BOOT_COUNT, g_persistMgr.bootCount);
@@ -236,7 +237,8 @@ void Storage_Cyclic(void)
     uint32_t nowTick;
     uint32_t elapsedMs;
 
-    if ((g_persistMgr.isReady == false) || (g_persistMgr.memoryAvailable == false))
+    if ((g_persistMgr.isReady == false)
+            || (g_persistMgr.memoryAvailable == false))
     {
         return;
     }
@@ -249,7 +251,8 @@ void Storage_Cyclic(void)
 
     if ((nowTick - g_persistMgr.prevFlushTick) >= NVRAM_FLUSH_INTERVAL_MS)
     {
-        PersistentData_StoreValue(NVRAM_KEY_EXEC_TIME_MILLIS, g_persistMgr.execTimeMs);
+        PersistentData_StoreValue(NVRAM_KEY_EXEC_TIME_MILLIS,
+                                  g_persistMgr.execTimeMs);
         g_persistMgr.prevFlushTick = nowTick;
     }
 }
@@ -257,31 +260,14 @@ void Storage_Cyclic(void)
 /** @brief Flushes accumulated runtime to NVM before system shutdown. */
 void Storage_PrepareShutdown(void)
 {
-    if ((g_persistMgr.isReady == false) || (g_persistMgr.memoryAvailable == false))
+    if ((g_persistMgr.isReady == false)
+            || (g_persistMgr.memoryAvailable == false))
     {
         return;
     }
 
-    PersistentData_StoreValue(NVRAM_KEY_EXEC_TIME_MILLIS, g_persistMgr.execTimeMs);
+    PersistentData_StoreValue(NVRAM_KEY_EXEC_TIME_MILLIS,
+                              g_persistMgr.execTimeMs);
     g_persistMgr.prevFlushTick = HAL_GetTick();
 }
 
-/**
- * @brief Retrieves the boot sequence counter.
- *
- * @return Current boot count.
- */
-uint32_t Storage_GetStartupCounter(void)
-{
-    return g_persistMgr.bootCount;
-}
-
-/**
- * @brief Retrieves the accumulated runtime counter.
- *
- * @return Cumulative execution time in milliseconds.
- */
-uint32_t Storage_GetAccumulatedRuntimeMs(void)
-{
-    return g_persistMgr.execTimeMs;
-}

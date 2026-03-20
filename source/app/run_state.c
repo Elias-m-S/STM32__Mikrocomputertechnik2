@@ -53,9 +53,6 @@ static void RunState_Cyclic_Error(RunState const* pRunState);
 /** @brief Last tick used for LED toggling in run mode. */
 static uint32_t s_lastToggleTick = 0U;
 
-/** @brief Last sampled state of switch SW2 for edge detection. */
-static GPIO_PinState SW2_LAST_STATE = GPIO_PIN_RESET;
-
 /*******************************************************************************
  * Functions
  *******************************************************************************/
@@ -101,26 +98,20 @@ static bool RunState_Cyclic_SelfTest(RunState const* pRunState, bool* pError)
  */
 static void RunState_Cyclic_Running(RunState* const pRunState)
 {
-    assert_param(pRunState != NULL);
+    uint32_t currentTick = HAL_GetTick();
 
-    uint32_t tick = HAL_GetTick();
-    RunState_Cyclic_Running_HandleLED_D1(tick);
+    // Toggle LED with its own Function
+    RunState_Cyclic_Running_HandleLED_D1(currentTick);
 
-    GPIO_PinState currentPin = HAL_GPIO_ReadPin(SW_2_GPIO_Port, SW_2_Pin);
-
-    if (SW2_LAST_STATE != currentPin && currentPin == GPIO_PIN_RESET)
-    {
-        Acceleration_RequestConfigure();
-    }
-
-    SW2_LAST_STATE = currentPin;
-
-    PowerModes_Cyclic();
-    Processing_Cyclic();
+    // Read IMU Data
     Acceleration_Cyclic();
+
+    //Print Data
+    Processing_Cyclic();
+
+    //Store Data
     Storage_Cyclic();
 }
-
 /**
  * @brief Blinks LED D1 at 1 Hz in RUN mode.
  *
@@ -173,7 +164,6 @@ void RunState_Init(RunState* const pThis)
     pThis->data.cycleCounter = 0U;
 
     s_lastToggleTick = HAL_GetTick();
-    SW2_LAST_STATE = HAL_GPIO_ReadPin(SW_2_GPIO_Port, SW_2_Pin);
 
     pThis->initialized = true;
 }
